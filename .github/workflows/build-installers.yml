@@ -1,15 +1,7 @@
 name: Build Windows Installer
 
 on:
-  push:
-    branches:
-      - "0.10"
-  pull_request:
-    branches:
-      - "0.10"
-  workflow_dispatch:
-  release:
-    types: [published]
+  workflow_call:
 
 permissions:
   contents: write
@@ -70,17 +62,105 @@ jobs:
           BDISTWHEELFREEZELIBS: "true"
         run: python -m build
 
-      - name: Install application wheel and dependencies
+      - name: Install application dependencies without compiling LevelDB
         shell: pwsh
         env:
-          # GitHub's windows-2022 image also has a VS 2026 preview installed.
-          # Force CMake to use the VS 2022 toolchain initialized above.
           CMAKE_GENERATOR: "Visual Studio 17 2022"
           CMAKE_GENERATOR_PLATFORM: "x64"
         run: |
           $wheel = Get-ChildItem dist/amulet_map_editor-*.whl | Select-Object -First 1
           if (-not $wheel) { throw "Application wheel was not produced." }
+
+          # Install Python dependencies first. Amulet-LevelDB currently hardcodes
+          # the VS 2026 generator in its setup.py, so skip its native extension
+          # temporarily and rebuild it from a patched sdist below.
+          $env:AMULET_SKIP_COMPILE = "1"
           python -m pip install $wheel.FullName --upgrade
+          if ($LASTEXITCODE -ne 0) { throw "Could not install Amulet application dependencies." }
+          Remove-Item Env:AMULET_SKIP_COMPILE
+
+          $leveldbVersion = python -c "from importlib.metadata import version; print(version('amulet-leveldb'))"
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($leveldbVersion)) {
+            throw "Could not determine installed amulet-leveldb version."
+          }
+          Write-Host "Preparing amulet-leveldb $leveldbVersion for Visual Studio 2022"
+
+          $sourceRoot = Join-Path $env:RUNNER_TEMP "amulet-leveldb-source"
+          New-Item -ItemType Directory -Force -Path $sourceRoot | Out-Null
+          python -m pip download --no-deps --no-binary=:all: --dest $sourceRoot "amulet-leveldb==$leveldbVersion"
+          if ($LASTEXITCODE -ne 0) { throw "Could not download amulet-leveldb source distribution." }
+
+          $archive = Get-ChildItem $sourceRoot -File | Where-Object { $_.Name -match '\.(tar\.gz|tgz)
+      - name: Build PyInstaller bundle
+        shell: pwsh
+        run: python -m PyInstaller -y --distpath ./installer/dist installer/Amulet.spec
+
+      - name: Build Windows installer
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ github.event.release.tag_name }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:RELEASE_VERSION)) {
+            $version = python -c "import amulet_map_editor; print(amulet_map_editor.__version__)"
+          } else {
+            $version = $env:RELEASE_VERSION.TrimStart("v")
+          }
+          if ($version -notmatch '^\d+(\.\d+){1,3}([a-zA-Z0-9.+-]*)?$') {
+            throw "Invalid installer version: $version"
+          }
+          Push-Location installer
+          try {
+            makensis "/DVERSION=$version" "/DARCH=x64" windows.nsi
+          } finally {
+            Pop-Location
+          }
+          if (-not (Test-Path "installer/dist/Amulet-$version-Windows-x64.exe")) {
+            throw "NSIS installer was not created."
+          }
+
+      - name: Upload Windows installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Amulet-Windows-x64
+          path: installer/dist/Amulet-*-Windows-x64.exe
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Attach Windows installer to GitHub Release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          GH_TAG: ${{ github.event.release.tag_name }}
+        shell: pwsh
+        run: gh release upload "$env:GH_TAG" installer/dist/Amulet-*-Windows-x64.exe --clobber
+ } | Select-Object -First 1
+          if (-not $archive) { throw "amulet-leveldb source archive was not downloaded." }
+          tar -xzf $archive.FullName -C $sourceRoot
+          $source = Get-ChildItem $sourceRoot -Directory | Select-Object -First 1
+          if (-not $source) { throw "Could not extract amulet-leveldb source." }
+
+          $setupPath = Join-Path $source.FullName "setup.py"
+          $setupText = Get-Content $setupPath -Raw
+          if (-not $setupText.Contains("Visual Studio 18 2026")) {
+            throw "Expected hardcoded Visual Studio 2026 generator was not found; refusing to patch an unexpected source version."
+          }
+          $setupText = $setupText.Replace("Visual Studio 18 2026", "Visual Studio 17 2022").Replace('"v145"', '"v143"')
+          Set-Content -Path $setupPath -Value $setupText -Encoding utf8
+
+          python -m pip install --upgrade setuptools wheel versioneer packaging pybind11
+          if ($LASTEXITCODE -ne 0) { throw "Could not install native extension build requirements." }
+
+          Push-Location $source.FullName
+          try {
+            python -m pip install --no-build-isolation --no-deps .
+            if ($LASTEXITCODE -ne 0) { throw "Patched amulet-leveldb failed to compile with Visual Studio 2022." }
+          } finally {
+            Pop-Location
+          }
+
+          python -c "from amulet.leveldb import LevelDB; import amulet.leveldb._leveldb; print('Amulet LevelDB native extension loaded successfully')"
+          if ($LASTEXITCODE -ne 0) { throw "Amulet LevelDB native extension verification failed." }
 
       - name: Build PyInstaller bundle
         shell: pwsh
