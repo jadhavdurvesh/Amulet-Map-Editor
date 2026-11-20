@@ -76,9 +76,15 @@ jobs:
 
           $sourceRoot = Join-Path $env:RUNNER_TEMP "amulet-leveldb-source"
           New-Item -ItemType Directory -Force -Path $sourceRoot | Out-Null
-          python -m pip download --no-deps --no-binary=:all: --dest $sourceRoot "amulet-leveldb==$leveldbVersion"
-          if ($LASTEXITCODE -ne 0) { throw "Could not download amulet-leveldb source." }
-
+          # Query PyPI directly for the sdist URL. "pip download" invokes the
+          # PEP 517 backend while resolving metadata, which fails because this
+          # package pins an unavailable amulet-compiler-version build dependency.
+          $pypi = Invoke-RestMethod -Uri "https://pypi.org/pypi/amulet-leveldb/$leveldbVersion/json"
+          $sdist = $pypi.urls | Where-Object { $_.packagetype -eq "sdist" } | Select-Object -First 1
+          if (-not $sdist) { throw "PyPI did not publish an amulet-leveldb source archive." }
+          $archivePath = Join-Path $sourceRoot $sdist.filename
+          Invoke-WebRequest -Uri $sdist.url -OutFile $archivePath
+          if (-not (Test-Path $archivePath)) { throw "Could not download amulet-leveldb source." }
           $archive = Get-ChildItem $sourceRoot -File -Filter "*.tar.gz" | Select-Object -First 1
           if (-not $archive) { throw "The amulet-leveldb source archive was not found." }
           tar -xzf $archive.FullName -C $sourceRoot
