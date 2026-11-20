@@ -1,4 +1,4 @@
-name: Build Installers
+name: Build Windows Installer
 
 on:
   push:
@@ -15,12 +15,12 @@ permissions:
   contents: write
 
 concurrency:
-  group: installers-${{ github.ref }}
+  group: windows-installer-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   windows:
-    name: Windows installer
+    name: Windows x64 installer
     runs-on: windows-2022
     steps:
       - name: Check out source
@@ -34,25 +34,33 @@ jobs:
           python-version: "3.11"
           architecture: x64
 
+      - name: Set up MSVC C++ build environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install CMake 4.1+ and Python build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "cmake>=4.1,<5" "pyinstaller~=6.18" build wheel
+          cmake --version
+          if ((cmake --version | Select-Object -First 1) -notmatch 'version 4\.') {
+            throw "CMake 4.x is required to build amulet-leveldb."
+          }
+
       - name: Install NSIS
         uses: repolevedavaj/install-nsis@v1.2.0
         with:
           nsis-version: "3.11"
 
-      - name: Install build dependencies
-        shell: pwsh
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install "pyinstaller~=6.18" build wheel
-
       - name: Build application wheel
         shell: pwsh
         env:
           BDISTWHEELFREEZELIBS: "true"
-        run: |
-          python -m build
+        run: python -m build
 
-      - name: Install application wheel
+      - name: Install application wheel and dependencies
         shell: pwsh
         run: |
           $wheel = Get-ChildItem dist/amulet_map_editor-*.whl | Select-Object -First 1
@@ -61,8 +69,7 @@ jobs:
 
       - name: Build PyInstaller bundle
         shell: pwsh
-        run: |
-          python -m PyInstaller -y --distpath ./installer/dist installer/Amulet.spec
+        run: python -m PyInstaller -y --distpath ./installer/dist installer/Amulet.spec
 
       - name: Build Windows installer
         shell: pwsh
@@ -102,193 +109,4 @@ jobs:
           GH_REPO: ${{ github.repository }}
           GH_TAG: ${{ github.event.release.tag_name }}
         shell: pwsh
-        run: |
-          gh release upload "$env:GH_TAG" installer/dist/Amulet-*-Windows-x64.exe --clobber
-
-  macos:
-    name: macOS disk image (Apple Silicon)
-    runs-on: macos-15
-    steps:
-      - name: Check out source
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          architecture: arm64
-
-      - name: Install build dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install "pyinstaller~=6.18" build wheel
-
-      - name: Build application wheel
-        env:
-          BDISTWHEELFREEZELIBS: "true"
-        run: python -m build
-
-      - name: Install application wheel
-        run: |
-          wheel=$(find dist -maxdepth 1 -name 'amulet_map_editor-*.whl' -print -quit)
-          test -n "$wheel"
-          python -m pip install "$wheel" --upgrade
-
-      - name: Build macOS app bundle
-        run: python -m PyInstaller -y --distpath ./installer/dist installer/Amulet.spec
-
-      - name: Create macOS DMG installer
-        env:
-          RELEASE_VERSION: ${{ github.event.release.tag_name }}
-        run: |
-          if [ -n "$RELEASE_VERSION" ]; then
-            VERSION="${RELEASE_VERSION#v}"
-          else
-            VERSION="$(python -c 'import amulet_map_editor; print(amulet_map_editor.__version__)')"
-          fi
-          APP="installer/dist/Amulet $VERSION.app"
-          test -d "$APP"
-          mkdir -p installer/dist/dmg
-          cp -a "$APP" installer/dist/dmg/
-          hdiutil create \
-            -volname "Amulet $VERSION" \
-            -srcfolder installer/dist/dmg \
-            -ov -format UDZO \
-            "installer/dist/Amulet-$VERSION-macOS-arm64.dmg"
-          rm -rf installer/dist/dmg
-          test -f "installer/dist/Amulet-$VERSION-macOS-arm64.dmg"
-
-      - name: Upload macOS installer artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Amulet-macOS-arm64
-          path: installer/dist/Amulet-*-macOS-arm64.dmg
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: Attach macOS installer to GitHub Release
-        if: github.event_name == 'release'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          GH_TAG: ${{ github.event.release.tag_name }}
-        run: gh release upload "$GH_TAG" installer/dist/Amulet-*-macOS-arm64.dmg --clobber
-
-  linux:
-    name: Linux Debian package
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Check out source
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential cmake ruby ruby-dev rubygems \
-            libgtk-3-dev libnotify-dev libsdl2-dev libsm6 \
-            libcurl4-openssl-dev libsecret-1-dev libpcre2-32-0 \
-            xdg-utils libgl1-mesa-dev libegl1-mesa-dev
-          sudo gem install fpm
-
-      - name: Install wxPython
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install \
-            https://extras.wxpython.org/wxPython4/extras/linux/gtk3/ubuntu-24.04/wxpython-4.2.5-cp311-cp311-linux_x86_64.whl
-
-      - name: Install build dependencies
-        run: python -m pip install "pyinstaller~=6.18" build wheel
-
-      - name: Build application wheel
-        env:
-          BDISTWHEELFREEZELIBS: "true"
-        run: python -m build
-
-      - name: Install application wheel
-        run: |
-          wheel=$(find dist -maxdepth 1 -name 'amulet_map_editor-*.whl' -print -quit)
-          test -n "$wheel"
-          python -m pip install "$wheel" --upgrade
-
-      - name: Build PyInstaller bundle
-        run: python -m PyInstaller -y --distpath ./installer/dist installer/Amulet.spec
-
-      - name: Build Debian installer
-        env:
-          RELEASE_VERSION: ${{ github.event.release.tag_name }}
-        run: |
-          if [ -n "$RELEASE_VERSION" ]; then
-            VERSION="${RELEASE_VERSION#v}"
-          else
-            VERSION="$(python -c 'import amulet_map_editor; print(amulet_map_editor.__version__)')"
-          fi
-          if ! [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+){1,3}([a-zA-Z0-9.+~-]*)?$ ]]; then
-            echo "Invalid package version: $VERSION" >&2
-            exit 1
-          fi
-
-          mkdir -p installer/dist/deb/opt
-          cp -a installer/dist/amulet installer/dist/deb/opt/amulet_map_editor
-
-          mkdir -p installer/dist/deb/usr/share/icons/hicolor/512x512/apps
-          install -m 644 installer/amulet_logo_512.png \
-            installer/dist/deb/usr/share/icons/hicolor/512x512/apps/amulet_map_editor.png
-
-          mkdir -p installer/dist/deb/usr/share/applications
-          cat > installer/dist/deb/usr/share/applications/amulet_map_editor.desktop <<'EOF'
-          [Desktop Entry]
-          Type=Application
-          Name=Amulet Map Editor
-          Comment=Minecraft world editor and converter
-          Path=/opt/amulet_map_editor
-          Exec=/opt/amulet_map_editor/amulet
-          Icon=amulet_map_editor
-          Terminal=false
-          Categories=Game;Utility;
-          EOF
-
-          chmod 755 installer/dist/deb/opt/amulet_map_editor
-          find installer/dist/deb/opt/amulet_map_editor -type d -exec chmod 755 {} +
-          find installer/dist/deb/opt/amulet_map_editor -type f -exec chmod 644 {} +
-          chmod 755 installer/dist/deb/opt/amulet_map_editor/amulet
-          chmod 755 installer/dist/deb/opt/amulet_map_editor/amulet_debug
-
-          fpm \
-            --chdir installer/dist/deb \
-            --input-type dir \
-            --output-type deb \
-            --name amulet-map-editor \
-            --version "$VERSION" \
-            --description "A Minecraft world editor and converter" \
-            --url https://www.amuletmc.com \
-            --maintainer "Amulet Team <amuleteditor@gmail.com>" \
-            --architecture amd64 \
-            --package "installer/dist/Amulet-$VERSION-Linux-x86_64.deb"
-
-          test -f "installer/dist/Amulet-$VERSION-Linux-x86_64.deb"
-
-      - name: Upload Linux installer artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Amulet-Linux-x86_64
-          path: installer/dist/Amulet-*-Linux-x86_64.deb
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: Attach Linux installer to GitHub Release
-        if: github.event_name == 'release'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          GH_TAG: ${{ github.event.release.tag_name }}
-        run: gh release upload "$GH_TAG" installer/dist/Amulet-*-Linux-x86_64.deb --clobber
+        run: gh release upload "$env:GH_TAG" installer/dist/Amulet-*-Windows-x64.exe --clobber
