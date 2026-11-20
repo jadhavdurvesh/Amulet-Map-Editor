@@ -72,6 +72,11 @@ jobs:
 
       - name: Install application wheel and dependencies
         shell: pwsh
+        env:
+          # GitHub's windows-2022 image also has a VS 2026 preview installed.
+          # Force CMake to use the VS 2022 toolchain initialized above.
+          CMAKE_GENERATOR: "Visual Studio 17 2022"
+          CMAKE_GENERATOR_PLATFORM: "x64"
         run: |
           $wheel = Get-ChildItem dist/amulet_map_editor-*.whl | Select-Object -First 1
           if (-not $wheel) { throw "Application wheel was not produced." }
