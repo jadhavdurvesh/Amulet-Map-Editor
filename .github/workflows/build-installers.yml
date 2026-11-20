@@ -44,10 +44,20 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install "cmake>=4.1,<5" "pyinstaller~=6.18" build wheel
-          cmake --version
-          if ((cmake --version | Select-Object -First 1) -notmatch 'version 4\.') {
+          # The pip-installed cmake.exe is a Python launcher. PEP 517 build
+          # isolation hides its cmake module, so invoke the bundled native binary.
+          $cmakeBin = python -c "import cmake, pathlib; print(pathlib.Path(cmake.__file__).parent / 'data' / 'bin')"
+          if (-not (Test-Path (Join-Path $cmakeBin "cmake.exe"))) {
+            throw "Native CMake binary was not found in the cmake wheel."
+          }
+          Add-Content -Path $env:GITHUB_PATH -Value $cmakeBin
+          $env:PATH = "$cmakeBin;$env:PATH"
+          $cmakeExe = Join-Path $cmakeBin "cmake.exe"
+          & $cmakeExe --version
+          if ((& $cmakeExe --version | Select-Object -First 1) -notmatch 'version 4\.') {
             throw "CMake 4.x is required to build amulet-leveldb."
           }
+          where.exe cmake
 
       - name: Install NSIS
         uses: repolevedavaj/install-nsis@v1.2.0
