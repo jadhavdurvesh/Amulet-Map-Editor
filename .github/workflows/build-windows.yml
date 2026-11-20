@@ -1,5 +1,7 @@
 name: Build Windows
 
+# Windows x64 installer workflow; shared build steps live in build-installers.yml.
+
 on:
   push:
     branches:
