@@ -68,7 +68,7 @@ jobs:
           $env:PIP_CONSTRAINT = $constraints
           python -m pip install $wheel.FullName --upgrade
           if ($LASTEXITCODE -ne 0) { throw "Application dependency installation failed." }
-          python -c "import amulet.leveldb._leveldb; print('Amulet LevelDB native extension loaded successfully')"
+          python -c "import leveldb._leveldb; print('Amulet LevelDB native extension loaded successfully')"
           if ($LASTEXITCODE -ne 0) { throw "LevelDB native extension verification failed." }
 
       - name: Build PyInstaller bundle
