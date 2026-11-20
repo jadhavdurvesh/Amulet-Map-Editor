@@ -7,7 +7,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: windows-installer-${ github.ref }}
+  group: windows-installer-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -76,7 +76,7 @@ jobs:
       - name: Build Windows installer
         shell: pwsh
         env:
-          RELEASE_VERSION: ${ github.event.release.tag_name }}
+          RELEASE_VERSION: ${{ github.event.release.tag_name }}
         run: |
           if ([string]::IsNullOrWhiteSpace($env:RELEASE_VERSION)) {
             $version = python -c "import amulet_map_editor; print(amulet_map_editor.__version__)"
@@ -108,8 +108,8 @@ jobs:
       - name: Attach Windows installer to GitHub Release
         if: github.event_name == 'release'
         env:
-          GH_TOKEN: ${ github.token }}
-          GH_REPO: ${ github.repository }}
-          GH_TAG: ${ github.event.release.tag_name }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          GH_TAG: ${{ github.event.release.tag_name }}
         shell: pwsh
         run: gh release upload "$env:GH_TAG" installer/dist/Amulet-*-Windows-x64.exe --clobber
