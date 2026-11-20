@@ -55,67 +55,19 @@ jobs:
           BDISTWHEELFREEZELIBS: "true"
         run: python -m build
 
-      - name: Install application dependencies and compile LevelDB for VS 2022
+      - name: Install application dependencies
         shell: pwsh
-        env:
-          CMAKE_GENERATOR: "Visual Studio 17 2022"
-          CMAKE_GENERATOR_PLATFORM: "x64"
         run: |
           $wheel = Get-ChildItem dist/amulet_map_editor-*.whl | Select-Object -First 1
           if (-not $wheel) { throw "Application wheel was not produced." }
 
-          # Install the application and Python dependencies without invoking
-          # the LevelDB native build. Its published setup.py hardcodes VS 2026.
-          $env:AMULET_SKIP_COMPILE = "1"
+          # amulet-leveldb 1.1.x is source-only on Python 3.11 and currently
+          # requires a newer Visual Studio generator than the hosted runner.
+          $constraints = Join-Path $env:RUNNER_TEMP "constraints.txt"
+          Set-Content -Path $constraints -Value "amulet-leveldb==1.0.7"
+          $env:PIP_CONSTRAINT = $constraints
           python -m pip install $wheel.FullName --upgrade
           if ($LASTEXITCODE -ne 0) { throw "Application dependency installation failed." }
-          Remove-Item Env:AMULET_SKIP_COMPILE
-
-          $leveldbVersion = python -c "from importlib.metadata import version; print(version('amulet-leveldb'))"
-          if ($LASTEXITCODE -ne 0) { throw "Could not detect amulet-leveldb version." }
-
-          $sourceRoot = Join-Path $env:RUNNER_TEMP "amulet-leveldb-source"
-          New-Item -ItemType Directory -Force -Path $sourceRoot | Out-Null
-          # Query PyPI directly for the sdist URL. "pip download" invokes the
-          # PEP 517 backend while resolving metadata, which fails because this
-          # package pins an unavailable amulet-compiler-version build dependency.
-          $pypi = Invoke-RestMethod -Uri "https://pypi.org/pypi/amulet-leveldb/$leveldbVersion/json"
-          $sdist = $pypi.urls | Where-Object { $_.packagetype -eq "sdist" } | Select-Object -First 1
-          if (-not $sdist) { throw "PyPI did not publish an amulet-leveldb source archive." }
-          $archivePath = Join-Path $sourceRoot $sdist.filename
-          Invoke-WebRequest -Uri $sdist.url -OutFile $archivePath
-          if (-not (Test-Path $archivePath)) { throw "Could not download amulet-leveldb source." }
-          $archive = Get-ChildItem $sourceRoot -File -Filter "*.tar.gz" | Select-Object -First 1
-          if (-not $archive) { throw "The amulet-leveldb source archive was not found." }
-          tar -xzf $archive.FullName -C $sourceRoot
-          if ($LASTEXITCODE -ne 0) { throw "Could not extract amulet-leveldb source." }
-
-          $source = Get-ChildItem $sourceRoot -Directory | Select-Object -First 1
-          if (-not $source) { throw "The amulet-leveldb source directory was not found." }
-          $setupPath = Join-Path $source.FullName "setup.py"
-          $setupText = Get-Content $setupPath -Raw
-          if (-not $setupText.Contains("Visual Studio 18 2026")) {
-            throw "Expected VS 2026 generator was not found in this dependency version; refusing an unsafe patch."
-          }
-          $setupText = $setupText.Replace("Visual Studio 18 2026", "Visual Studio 17 2022")
-          $setupText = $setupText.Replace('"v145"', '"v143"')
-          Set-Content -Path $setupPath -Value $setupText -Encoding utf8
-
-          if ((Get-Content $setupPath -Raw).Contains("Visual Studio 18 2026")) {
-            throw "Failed to patch the LevelDB CMake generator."
-          }
-
-          python -m pip install --upgrade setuptools wheel versioneer packaging pybind11
-          if ($LASTEXITCODE -ne 0) { throw "Could not install LevelDB build requirements." }
-
-          Push-Location $source.FullName
-          try {
-            python -m pip install --no-build-isolation --no-deps .
-            if ($LASTEXITCODE -ne 0) { throw "Patched amulet-leveldb failed to compile." }
-          } finally {
-            Pop-Location
-          }
-
           python -c "import amulet.leveldb._leveldb; print('Amulet LevelDB native extension loaded successfully')"
           if ($LASTEXITCODE -ne 0) { throw "LevelDB native extension verification failed." }
 
