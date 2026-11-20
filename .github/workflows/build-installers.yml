@@ -7,7 +7,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: windows-installer-${{ github.ref }}
+  group: windows-installer-${ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -37,9 +37,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install "cmake>=4.1,<5" "pyinstaller~=6.18" build wheel
           $cmakeBin = python -c "import cmake, pathlib; print(pathlib.Path(cmake.__file__).parent / 'data' / 'bin')"
-          if (-not (Test-Path (Join-Path $cmakeBin "cmake.exe"))) {
-            throw "Native CMake binary was not found."
-          }
+          if (-not (Test-Path (Join-Path $cmakeBin "cmake.exe"))) { throw "Native CMake binary was not found." }
           Add-Content -Path $env:GITHUB_PATH -Value $cmakeBin
           $env:PATH = "$cmakeBin;$env:PATH"
           & (Join-Path $cmakeBin "cmake.exe") --version
@@ -60,9 +58,6 @@ jobs:
         run: |
           $wheel = Get-ChildItem dist/amulet_map_editor-*.whl | Select-Object -First 1
           if (-not $wheel) { throw "Application wheel was not produced." }
-
-          # amulet-leveldb 1.1.x is source-only on Python 3.11 and currently
-          # requires a newer Visual Studio generator than the hosted runner.
           $constraints = Join-Path $env:RUNNER_TEMP "constraints.txt"
           Set-Content -Path $constraints -Value "amulet-leveldb==1.0.7"
           $env:PIP_CONSTRAINT = $constraints
@@ -76,21 +71,19 @@ jobs:
         run: |
           python -m PyInstaller -y --distpath ./installer/dist installer/Amulet.spec
           if ($LASTEXITCODE -ne 0) { throw "PyInstaller bundle build failed." }
-          if (-not (Test-Path "installer/dist/amulet/amulet.exe")) {
-            throw "PyInstaller did not produce installer/dist/amulet/amulet.exe."
-          }
+          if (-not (Test-Path "installer/dist/amulet/amulet.exe")) { throw "PyInstaller did not produce installer/dist/amulet/amulet.exe." }
 
       - name: Build Windows installer
         shell: pwsh
         env:
-          RELEASE_VERSION: ${{ github.event.release.tag_name }}
+          RELEASE_VERSION: ${ github.event.release.tag_name }}
         run: |
           if ([string]::IsNullOrWhiteSpace($env:RELEASE_VERSION)) {
             $version = python -c "import amulet_map_editor; print(amulet_map_editor.__version__)"
           } else {
             $version = $env:RELEASE_VERSION.TrimStart("v")
           }
-          if ($version -notmatch '^\d+(\.\d+){0,3}([a-zA-Z0-9.+-]*)? {
+          if ($version -notmatch '^\d+(\.\d+){0,3}([a-zA-Z0-9.+-]*)?$') {
             throw "Invalid installer version: $version"
           }
           Push-Location installer
@@ -115,38 +108,8 @@ jobs:
       - name: Attach Windows installer to GitHub Release
         if: github.event_name == 'release'
         env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          GH_TAG: ${{ github.event.release.tag_name }}
-        shell: pwsh
-        run: gh release upload "$env:GH_TAG" installer/dist/Amulet-*-Windows-x64.exe --clobber
-) {
-            throw "Invalid installer version: $version"
-          }
-          Push-Location installer
-          try {
-            makensis "/DVERSION=$version" "/DARCH=x64" windows.nsi
-            if ($LASTEXITCODE -ne 0) { throw "NSIS installer compilation failed." }
-          } finally {
-            Pop-Location
-          }
-          if (-not (Test-Path "installer/dist/Amulet-$version-Windows-x64.exe")) {
-            throw "NSIS installer was not created."
-          }
-
-      - name: Upload Windows installer artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Amulet-Windows-x64
-          path: installer/dist/Amulet-*-Windows-x64.exe
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: Attach Windows installer to GitHub Release
-        if: github.event_name == 'release'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          GH_TAG: ${{ github.event.release.tag_name }}
+          GH_TOKEN: ${ github.token }}
+          GH_REPO: ${ github.repository }}
+          GH_TAG: ${ github.event.release.tag_name }}
         shell: pwsh
         run: gh release upload "$env:GH_TAG" installer/dist/Amulet-*-Windows-x64.exe --clobber
