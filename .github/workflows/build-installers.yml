@@ -100,6 +100,77 @@ jobs:
         run: |
           gh release upload "$env:GH_TAG" installer/dist/Amulet-*-Windows-x64.exe --clobber
 
+  macos:
+    name: macOS disk image (Apple Silicon)
+    runs-on: macos-15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          architecture: arm64
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "pyinstaller~=6.18" build wheel
+
+      - name: Build application wheel
+        env:
+          BDISTWHEELFREEZELIBS: "true"
+        run: python -m build
+
+      - name: Install application wheel
+        run: |
+          wheel=$(find dist -maxdepth 1 -name 'amulet_map_editor-*.whl' -print -quit)
+          test -n "$wheel"
+          python -m pip install "$wheel" --upgrade
+
+      - name: Build macOS app bundle
+        run: python -m PyInstaller -y --distpath ./installer/dist installer/Amulet.spec
+
+      - name: Create macOS DMG installer
+        env:
+          RELEASE_VERSION: ${{ github.event.release.tag_name }}
+        run: |
+          if [ -n "$RELEASE_VERSION" ]; then
+            VERSION="${RELEASE_VERSION#v}"
+          else
+            VERSION="$(python -c 'import amulet_map_editor; print(amulet_map_editor.__version__)')"
+          fi
+          APP="installer/dist/Amulet $VERSION.app"
+          test -d "$APP"
+          mkdir -p installer/dist/dmg
+          cp -a "$APP" installer/dist/dmg/
+          hdiutil create \
+            -volname "Amulet $VERSION" \
+            -srcfolder installer/dist/dmg \
+            -ov -format UDZO \
+            "installer/dist/Amulet-$VERSION-macOS-arm64.dmg"
+          rm -rf installer/dist/dmg
+          test -f "installer/dist/Amulet-$VERSION-macOS-arm64.dmg"
+
+      - name: Upload macOS installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Amulet-macOS-arm64
+          path: installer/dist/Amulet-*-macOS-arm64.dmg
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Attach macOS installer to GitHub Release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          GH_TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$GH_TAG" installer/dist/Amulet-*-macOS-arm64.dmg --clobber
+
   linux:
     name: Linux Debian package
     runs-on: ubuntu-24.04
