@@ -77,7 +77,12 @@ jobs:
           if ($version -notmatch '^\d+(\.\d+){1,3}([a-zA-Z0-9.+-]*)?$') {
             throw "Invalid installer version: $version"
           }
-          makensis "/DVERSION=$version" "/DARCH=x64" installer/windows.nsi
+          Push-Location installer
+          try {
+            makensis "/DVERSION=$version" "/DARCH=x64" windows.nsi
+          } finally {
+            Pop-Location
+          }
           if (-not (Test-Path "installer/dist/Amulet-$version-Windows-x64.exe")) {
             throw "NSIS installer was not created."
           }
